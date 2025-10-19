@@ -1,0 +1,780 @@
+rbf_kernel <- function(X, X_prime, l, sigma_f) {
+  D <- as.matrix(dist(c(X, X_prime), diag = TRUE, upper = TRUE))
+  n1 <- length(X)
+  n2 <- length(X_prime)
+  K_sub <- D[1:n1, (n1 + 1):(n1 + n2)]
+  K <- sigma_f^2 * exp(-0.5 * (K_sub^2) / l^2)
+  return(K)
+}
+matern_5_2_kernel <- function(X, X_prime, l, sigma_f) {
+  D <- as.matrix(dist(c(X, X_prime), diag = TRUE, upper = TRUE))
+  n1 <- length(X)
+  n2 <- length(X_prime)
+  K_sub <- D[1:n1, (n1 + 1):(n1 + n2)]
+  r <- abs(K_sub) 
+  term1 <- (1 + sqrt(5) * r / l)
+  term2 <- (5 * r^2) / (3 * l^2)
+  K <- sigma_f^2 * (term1 + term2) * exp(-sqrt(5) * r / l)
+  return(K)
+}
+
+matern_3_2_kernel <- function(X, X_prime, l, sigma_f) {
+  D <- as.matrix(dist(c(X, X_prime), diag = TRUE, upper = TRUE))
+  n1 <- length(X)
+  n2 <- length(X_prime)
+  K_sub <- D[1:n1, (n1 + 1):(n1 + n2)]
+  r <- abs(K_sub) 
+  K <- sigma_f^2 * (1 + sqrt(3) * r / l) * exp(-sqrt(3) * r / l)
+  return(K)
+}
+
+library(MASS)
+
+X_star <- seq(-5, 5, length.out = 100)
+n_samples <- 5
+l_val <- 1
+sigma_f_val <- 1
+
+K_rbf <- rbf_kernel(X_star, X_star, l = l_val, sigma_f = sigma_f_val)
+K_rbf <- K_rbf + diag(1e-6, nrow(K_rbf)) 
+f_rbf_samples <- mvrnorm(n = n_samples, mu = rep(0, length(X_star)), Sigma = K_rbf)
+
+K_matern_5_2 <- matern_5_2_kernel(X_star, X_star, l = l_val, sigma_f = sigma_f_val)
+K_matern_5_2 <- K_matern_5_2 + diag(1e-6, nrow(K_matern_5_2))
+f_matern_5_2_samples <- mvrnorm(n = n_samples, mu = rep(0, length(X_star)), Sigma = K_matern_5_2)
+
+K_matern_3_2 <- matern_3_2_kernel(X_star, X_star, l = l_val, sigma_f = sigma_f_val)
+K_matern_3_2 <- K_matern_3_2 + diag(1e-6, nrow(K_matern_3_2))
+f_matern_3_2_samples <- mvrnorm(n = n_samples, mu = rep(0, length(X_star)), Sigma = K_matern_3_2)
+
+par(mfrow = c(3, 1), mar = c(4, 4, 2, 1))
+
+plot(X_star, f_rbf_samples[1, ], type = 'l', ylim = c(-3, 3), 
+     main = expression(paste("Kernel Prior: RBF (", nu, " -> ", infinity, ", Infinitely Smooth)")), 
+     ylab = "f(x)", xlab = "x", lwd = 2)
+for (i in 2:n_samples) {
+  lines(X_star, f_rbf_samples[i, ], col = i + 1, lwd = 2)
+}
+legend("topright", legend = paste("Sample", 1:n_samples), col = 2:(n_samples + 1), lty = 1, cex = 0.7)
+
+plot(X_star, f_matern_5_2_samples[1, ], type = 'l', ylim = c(-3, 3), 
+     main = expression(paste("Kernel Prior: Matern 5/2 (", nu, " = 2.5, Twice Differentiable)")), 
+     ylab = "f(x)", xlab = "x", lwd = 2)
+for (i in 2:n_samples) {
+  lines(X_star, f_matern_5_2_samples[i, ], col = i + 1, lwd = 2)
+}
+
+plot(X_star, f_matern_3_2_samples[1, ], type = 'l', ylim = c(-3, 3), 
+     main = expression(paste("Kernel Prior: Matern 3/2 (", nu, " = 1.5, Once Differentiable)")), 
+     ylab = "f(x)", xlab = "x", lwd = 2)
+for (i in 2:n_samples) {
+  lines(X_star, f_matern_3_2_samples[i, ], col = i + 1, lwd = 2)
+}
+
+par(mfrow = c(1, 1)) 
+library(kernlab)
+library(DiceKriging)
+data(faithful)
+#Old Faithful Time
+plot(faithful$eruptions, faithful$waiting,
+     xlab="Eruption time (min)",
+     ylab="Waiting time to next eruption (min)",
+     pch=19, col="blue")
+
+X <- data.frame(eruptions = faithful$eruptions)
+y <- faithful$waiting                            
+
+
+gp_model <-  km(design=data.frame(X),response=y,nugget.estim = TRUE,control  = list(trace = FALSE))
+
+Xstar <- data.frame(eruptions = seq(min(X$eruptions), max(X$eruptions), length.out = 200))
+
+pred <- predict(gp_model, Xstar, type = "UK")
+pred_mean <- pred$mean
+pred_sd <- pred$sd  
+
+plot(X$eruptions, y, pch=19, col="darkgrey",
+     xlab="Eruption time (min)", ylab="Waiting time (min)",
+     main="GP Regression with DiceKriging (faithful data)")
+lines(Xstar$eruptions, pred_mean, col="blue", lwd=2)           
+lines(Xstar$eruptions, pred_mean + 2*pred_sd, col="blue", lty=2) 
+lines(Xstar$eruptions, pred_mean - 2*pred_sd, col="blue", lty=2) 
+points(X$eruptions, y, col="red", pch=19)                        
+
+m_gauss <- km(design = data.frame(X), response = y,covtype = "gauss", nugget.estim = TRUE, control  = list(trace = FALSE)  )
+# Matérn 3/2 
+m_matern32 <- km(design = data.frame(X), response = y,covtype = "matern3_2", nugget.estim = TRUE,control  = list(trace = FALSE) )
+# Matérn 5/2 
+m_matern52 <- km(design = data.frame(X), response = y,covtype = "matern5_2", nugget.estim = TRUE,control  = list(trace = FALSE) )
+# prediction
+p_gauss <- predict(m_gauss, newdata = Xstar, type = "UK")
+p_m32   <- predict(m_matern32, newdata = Xstar, type = "UK")
+p_m52   <- predict(m_matern52, newdata = Xstar, type = "UK")
+# plot
+plot(X$eruptions,y, pch=19, col="darkgrey",
+     xlab="Eruption time", ylab="Waiting time", main="Gaussian vs Matérn Kernels")
+lines(Xstar$eruptions, p_gauss$mean, col="blue", lwd=2)
+lines(Xstar$eruptions, p_m32$mean, col="red", lwd=2)
+lines(Xstar$eruptions, p_m52$mean, col="green", lwd=2)
+legend("topleft", legend=c("Gaussian (RBF)", "Matérn 3/2", "Matérn 5/2"),
+       col=c("blue","red","green"), lwd=2, bty="n")
+
+train_pred <- predict(m_gauss, newdata = X, type = "UK")
+rmse <- sqrt(mean((y - train_pred$mean)^2))
+cat("Training RMSE:", rmse, "\n")
+
+train_pred <- predict(m_matern32, newdata = X, type = "UK")
+rmse <- sqrt(mean((y - train_pred$mean)^2))
+cat("Training RMSE:", rmse, "\n")
+
+train_pred <- predict(m_matern52, newdata = X, type = "UK")
+rmse <- sqrt(mean((y - train_pred$mean)^2))
+cat("Training RMSE:", rmse, "\n")
+library(readxl)
+library(DiceKriging)
+data <- read_excel("C:/Users/xamer/Desktop/ENB2012_data.xlsx", sheet = 1)
+str(data)
+X <- as.matrix(data[, 1:8])
+y <- as.numeric(data$Y1)
+X_scaled <- scale(X)
+y_scaled <- scale(y)
+set.seed(123)
+N <- nrow(X_scaled)
+train_idx <- sample(1:N, size = floor(0.7 * N))
+test_idx  <- setdiff(1:N, train_idx)
+X_train <- X_scaled[train_idx, ]
+y_train <- y_scaled[train_idx]
+X_test  <- X_scaled[test_idx, ]
+y_test  <- y_scaled[test_idx]
+gp_model <- km(design = data.frame(X_train), response = y_train, control  = list(trace = FALSE))
+pred <- predict(gp_model, newdata = data.frame(X_test), type="UK")  
+pred_mean <- pred$mean
+pred_sd   <- pred$sd
+plot(pred_mean, y_test, pch=19, col="blue",
+     xlab="Predicted (scaled)",
+     ylab="Actual (scaled)",
+     main="GP Prediction vs Actual")
+abline(a=0, b=1, col="red")
+arrows(pred_mean, y_test - 2*pred_sd,
+       pred_mean, y_test + 2*pred_sd,
+       angle=90, code=3, length=0.05, col="lightblue")
+train_pred <- predict(gp_model, newdata = data.frame(X_train), type = "UK")
+train_mean <- train_pred$mean
+train_sd   <- train_pred$sd
+rmse_train <- sqrt(mean((y_train - train_mean)^2))
+cat("Training RMSE:", rmse_train, "\n")
+rmse_test <- sqrt(mean((y_test - pred_mean)^2))
+cat("Test RMSE:", rmse_test, "\n")
+r2_train <- 1 - sum((y_train - train_mean)^2)/sum((y_train - mean(y_train))^2)
+r2_test  <- 1 - sum((y_test - pred_mean)^2)/sum((y_test - mean(y_test))^2)
+cat("Training R²:", r2_train, "\n")
+cat("Test R²:", r2_test, "\n")
+
+library(laGP)
+data <- read.table("C:/Users/xamer/Desktop/cal_housing.data", 
+                   sep = ",", header = FALSE)
+
+colnames(data) <- c("Longitude", "Latitude", "housingMedianAge",
+                    "totalRooms", "totalBedrooms", "population",
+                    "households", "medianIncome", "medianHouseValue")
+
+X <- data[, c("Longitude", "Latitude", "housingMedianAge",
+              "totalRooms", "totalBedrooms", "population",
+              "households", "medianIncome")]
+y <- data$medianHouseValue
+
+X_scaled <- scale(X)
+y_scaled <- log(y)
+
+set.seed(123)
+N <- nrow(X_scaled)
+train_idx <- sample(1:N, size = 1500)       
+test_idx  <- setdiff(1:N, train_idx)       
+
+X_train <- X_scaled[train_idx, ]
+y_train <- y_scaled[train_idx]
+
+X_test  <- X_scaled[test_idx, ]
+y_test  <- y_scaled[test_idx]
+
+m <- 500  
+
+gp <- newGPsep(X_train, y_train, d = rep(1, ncol(X_train)), g = 1e-6, dK = TRUE)
+
+pred <- predGPsep(gp, XX = X_test, lite = TRUE)
+
+pred_mean <- pred$mean
+pred_sd   <- sqrt(pred$s2)
+
+plot(pred_mean[1:100], y_test[1:100], pch=19, col="blue")
+abline(a=0, b=1, col="red")
+x <- pred_mean[1:100]   
+y <- y_test[1:100]      
+sd <- pred_sd[1:100]    
+
+plot(x, y, pch=19, col="blue",
+     xlab="Predicted value",
+     ylab="Actual value",
+     main="Pred vs True with 95% CI")
+
+abline(a=0, b=1, col="red")
+
+arrows(x, y, x, y + 2*sd, angle=90, code=3, length=0.05, col="lightblue")
+
+
+
+
+
+plot(pred_mean, y_test, pch=19, col="blue",
+     xlab="Predicted log(MedianHouseValue)",
+     ylab="Actual log(MedianHouseValue)",
+     main="Local GP Prediction (California Housing)")
+abline(a=0, b=1, col="red")  
+
+rmse <- sqrt(mean((pred_mean - y_test)^2))
+cat("Test RMSE (log scale):", rmse, "\n")
+
+n_plot <- 100
+plot(1:n_plot, pred_mean[1:n_plot], ylim = range(c(pred_mean[1:n_plot]+2*pred_sd[1:n_plot],
+                                                   pred_mean[1:n_plot]-2*pred_sd[1:n_plot],
+                                                   y_test[1:n_plot])),
+     pch=19, col="blue", xlab="Test sample", ylab="log(MedianHouseValue)")
+arrows(1:n_plot, pred_mean[1:n_plot] - 2*pred_sd[1:n_plot],
+       1:n_plot, pred_mean[1:n_plot] + 2*pred_sd[1:n_plot],
+       angle=90, code=3, length=0.05, col="lightblue")
+points(1:n_plot, y_test[1:n_plot], pch=19, col="red")
+legend("topleft", legend=c("Prediction", "Actual", "95% CI"),
+       col=c("blue","red","lightblue"), pch=c(19,19,NA), lty=c(NA,NA,1))
+
+library(laGP)
+data <- read.table("C:/Users/xamer/Desktop/cal_housing.data", 
+                   sep = ",", header = FALSE)
+
+colnames(data) <- c("Longitude", "Latitude", "housingMedianAge",
+                    "totalRooms", "totalBedrooms", "population",
+                    "households", "medianIncome", "medianHouseValue")
+
+X <- data[, c("Longitude", "Latitude", "housingMedianAge",
+              "totalRooms", "totalBedrooms", "population",
+              "households", "medianIncome")]
+y <- data$medianHouseValue
+
+X_scaled <- scale(X)
+y_scaled <- log(y)
+
+set.seed(123)
+N <- nrow(X_scaled)
+train_idx <- sample(1:N, size = 1500)       
+test_idx  <- setdiff(1:N, train_idx)       
+
+X_train <- X_scaled[train_idx, ]
+y_train <- y_scaled[train_idx]
+
+X_test  <- X_scaled[test_idx, ]
+y_test  <- y_scaled[test_idx]
+
+m <- 500  
+
+gp <- newGPsep(X_train, y_train, d = rep(1, ncol(X_train)), g = 1e-6, dK = TRUE)
+
+pred <- predGPsep(gp, XX = X_test, lite = TRUE)
+
+pred_mean <- pred$mean
+pred_sd   <- sqrt(pred$s2)
+
+plot(pred_mean[1:100], y_test[1:100], pch=19, col="blue")
+abline(a=0, b=1, col="red")
+x <- pred_mean[1:100]   
+y <- y_test[1:100]      
+sd <- pred_sd[1:100]    
+
+plot(x, y, pch=19, col="blue",
+     xlab="Predicted value",
+     ylab="Actual value",
+     main="Pred vs True with 95% CI")
+
+abline(a=0, b=1, col="red")
+
+arrows(x, y, x, y + 2*sd, angle=90, code=3, length=0.05, col="lightblue")
+
+
+
+
+
+plot(pred_mean, y_test, pch=19, col="blue",
+     xlab="Predicted log(MedianHouseValue)",
+     ylab="Actual log(MedianHouseValue)",
+     main="Local GP Prediction (California Housing)")
+abline(a=0, b=1, col="red")  
+
+rmse <- sqrt(mean((pred_mean - y_test)^2))
+cat("Test RMSE (log scale):", rmse, "\n")
+
+n_plot <- 100
+plot(1:n_plot, pred_mean[1:n_plot], ylim = range(c(pred_mean[1:n_plot]+2*pred_sd[1:n_plot],
+                                                   pred_mean[1:n_plot]-2*pred_sd[1:n_plot],
+                                                   y_test[1:n_plot])),
+     pch=19, col="blue", xlab="Test sample", ylab="log(MedianHouseValue)")
+arrows(1:n_plot, pred_mean[1:n_plot] - 2*pred_sd[1:n_plot],
+       1:n_plot, pred_mean[1:n_plot] + 2*pred_sd[1:n_plot],
+       angle=90, code=3, length=0.05, col="lightblue")
+points(1:n_plot, y_test[1:n_plot], pch=19, col="red")
+legend("topleft", legend=c("Prediction", "Actual", "95% CI"),
+       col=c("blue","red","lightblue"), pch=c(19,19,NA), lty=c(NA,NA,1))
+
+library(laGP)
+data <- read.table("C:/Users/xamer/Desktop/cal_housing.data", 
+                  sep = ",", header = FALSE)
+
+colnames(data) <- c("Longitude", "Latitude", "housingMedianAge",
+                   "totalRooms", "totalBedrooms", "population",
+                   "households", "medianIncome", "medianHouseValue")
+
+X <- data[, c("Longitude", "Latitude", "housingMedianAge",
+             "totalRooms", "totalBedrooms", "population",
+             "households", "medianIncome")]
+y <- data$medianHouseValue
+
+X_scaled <- scale(X)
+y_scaled <- log(y)
+
+set.seed(123)
+N <- nrow(X_scaled)
+train_idx <- sample(1:N, size = 1500)       
+test_idx  <- setdiff(1:N, train_idx)       
+
+X_train <- X_scaled[train_idx, ]
+y_train <- y_scaled[train_idx]
+
+X_test  <- X_scaled[test_idx, ]
+y_test  <- y_scaled[test_idx]
+
+m <- 500  
+
+gp <- newGPsep(X_train, y_train, d = rep(1, ncol(X_train)), g = 1e-6, dK = TRUE)
+
+pred <- predGPsep(gp, XX = X_test, lite = TRUE)
+
+pred_mean <- pred$mean
+pred_sd   <- sqrt(pred$s2)
+
+plot(pred_mean[1:100], y_test[1:100], pch=19, col="blue")
+abline(a=0, b=1, col="red")
+x <- pred_mean[1:100]   
+y <- y_test[1:100]      
+sd <- pred_sd[1:100]    
+
+plot(x, y, pch=19, col="blue",
+     xlab="Predicted value",
+     ylab="Actual value",
+     main="Pred vs True with 95% CI")
+
+abline(a=0, b=1, col="red")
+
+arrows(x, y, x, y + 2*sd, angle=90, code=3, length=0.05, col="lightblue")
+
+
+
+
+
+plot(pred_mean, y_test, pch=19, col="blue",
+     xlab="Predicted log(MedianHouseValue)",
+     ylab="Actual log(MedianHouseValue)",
+     main="Local GP Prediction (California Housing)")
+abline(a=0, b=1, col="red")  
+
+rmse <- sqrt(mean((pred_mean - y_test)^2))
+cat("Test RMSE (log scale):", rmse, "\n")
+
+n_plot <- 100
+plot(1:n_plot, pred_mean[1:n_plot], ylim = range(c(pred_mean[1:n_plot]+2*pred_sd[1:n_plot],
+                                                   pred_mean[1:n_plot]-2*pred_sd[1:n_plot],
+                                                   y_test[1:n_plot])),
+     pch=19, col="blue", xlab="Test sample", ylab="log(MedianHouseValue)")
+arrows(1:n_plot, pred_mean[1:n_plot] - 2*pred_sd[1:n_plot],
+       1:n_plot, pred_mean[1:n_plot] + 2*pred_sd[1:n_plot],
+       angle=90, code=3, length=0.05, col="lightblue")
+points(1:n_plot, y_test[1:n_plot], pch=19, col="red")
+legend("topleft", legend=c("Prediction", "Actual", "95% CI"),
+       col=c("blue","red","lightblue"), pch=c(19,19,NA), lty=c(NA,NA,1))
+
+
+library(R.matlab)
+library(kernlab)
+cat("Gaussian Process Regression (Subsampled 3000 points)\n")
+cat("Loading SARCOS data ...\n")
+train_path <- "C:/Users/xamer/Desktop/sarcos_inv.mat"
+test_path  <- "C:/Users/xamer/Desktop/sarcos_inv_test.mat"
+train_data <- readMat(train_path)
+test_data  <- readMat(test_path)
+train <- train_data$sarcos.inv
+test  <- test_data$sarcos.inv.test
+X_train <- train[, 1:21]
+y_train <- train[, 22]
+X_test  <- test[, 1:21]
+y_test  <- test[, 22]
+set.seed(123)
+idx <- sample(1:nrow(X_train), 3000)
+X_train_sub <- X_train[idx, ]
+y_train_sub <- y_train[idx]
+cat("Using", length(idx), "training samples out of", nrow(X_train), "\n")
+X_mean <- apply(X_train_sub, 2, mean)
+X_sd   <- apply(X_train_sub, 2, sd)
+X_train_scaled <- scale(X_train_sub, center = X_mean, scale = X_sd)
+X_test_scaled  <- scale(X_test, center = X_mean, scale = X_sd)
+y_mean <- mean(y_train_sub)
+y_sd   <- sd(y_train_sub)
+y_train_scaled <- scale(y_train_sub, center = y_mean, scale = y_sd)
+cat("Training Gaussian Process model...\n")
+model_poly <- gausspr(
+  x = X_train_scaled,
+  y = y_train_scaled,
+  kernel = "polydot",
+  kpar = list(degree = 3, scale = 1, offset = 1), 
+  type = "regression"
+)
+cat("Predicting test data ...\n")
+pred_scaled <- predict(model_poly, X_test_scaled)
+pred <- pred_scaled * y_sd + y_mean
+rmse <- sqrt(mean((y_test - pred)^2))
+cat("Test RMSE:", round(rmse, 4), "\n")
+plot(y_test, pred,
+     pch = 19, col = "blue",
+     xlab = "Actual Torque", ylab = "Predicted Torque",
+     main = "SARCOS Gaussian Process (3000 samples, RBF kernel)")
+abline(a = 0, b = 1, col = "red", lwd = 2)
+rmse <- sqrt(mean((y_test - pred)^2))
+r2 <- 1 - sum((y_test - pred)^2)/sum((y_test - mean(y_test))^2)
+mae <- mean(abs(y_test - pred))
+max_err <- max(abs(y_test - pred))
+cat("Test RMSE:", round(rmse, 4), "\n")
+cat("Test R²:", round(r2, 4), "\n")
+cat("Test MAE:", round(mae, 4), "\n")
+cat("Max absolute error:", round(max_err, 4), "\n")
+residuals <- y_test - pred
+plot(pred, residuals,
+     pch=19, col="darkgreen",
+     xlab="Predicted Torque",
+     ylab="Residuals",
+     main="Residuals vs Predicted")
+abline(h=0, col="red", lwd=2)
+library(DiceKriging)
+library(R.matlab)
+library(kernlab)
+cat("Gaussian Process Regression (Subsampled 3000 points)\n")
+cat("Loading SARCOS data ...\n")
+train_path <- "C:/Users/xamer/Desktop/sarcos_inv.mat"
+test_path  <- "C:/Users/xamer/Desktop/sarcos_inv_test.mat"
+train_data <- readMat(train_path)
+test_data  <- readMat(test_path)
+train <- train_data$sarcos.inv
+test  <- test_data$sarcos.inv.test
+X_train <- train[, 1:21]
+y_train <- train[, 22]
+X_test  <- test[, 1:21]
+y_test  <- test[, 22]
+set.seed(123)
+idx <- sample(1:nrow(X_train),)
+X_train_sub <- X_train[idx, ]
+y_train_sub <- y_train[idx]
+cat("Using", length(idx), "training samples out of", nrow(X_train), "\n")
+set.seed(123)
+X_mean <- apply(X_train_sub, 2, mean)
+X_sd   <- apply(X_train_sub, 2, sd)
+X_train_scaled <- scale(X_train_sub, center = X_mean, scale = X_sd)
+X_test_scaled  <- scale(X_test, center = X_mean, scale = X_sd)
+y_mean <- mean(y_train_sub)
+y_sd   <- sd(y_train_sub)
+y_train_scaled <- scale(y_train_sub, center = y_mean, scale = y_sd)
+M <- 500 
+idx <- sample(1:nrow(X_train_scaled), M)
+X_sub <- X_train_scaled[idx, ]
+y_sub <- y_train_scaled[idx]
+
+cat("Training Sparse GP model (using", M, "inducing points)...\n")
+gp_model <- km(design = data.frame(X_sub), response = y_sub, covtype="gauss", nugget.estim = TRUE, control=list(trace=FALSE))
+
+cat("Predicting test data...\n")
+pred <- predict(gp_model, newdata = data.frame(X_test_scaled), type="UK")
+pred_mean_orig <- pred$mean * y_sd + y_mean
+
+rmse <- sqrt(mean((y_test - pred_mean_orig)^2))
+cat("Sparse GP Test RMSE:", round(rmse, 4), "\n")
+
+plot(y_test, pred_mean_orig,
+     pch = 19, col = "blue",
+     xlab = "Actual Torque", ylab = "Predicted Torque",
+     main = paste("Sparse GP on SARCOS (", M, " inducing points)", sep=""))
+abline(a=0, b=1, col="red", lwd=2)
+
+library(kernlab)
+library(caret)
+library(dplyr)
+library(MLmetrics)
+library(ggplot2)
+data(iris)
+set.seed(42)
+# Use all features for splitting
+index <- createDataPartition(iris$Species, p = 0.7, list = FALSE)
+train_data <- iris[index, ]
+test_data  <- iris[-index, ]
+cat(paste("Training Set Size (All Features):", nrow(train_data), "\n"))
+cat(paste("Testing Set Size (All Features):", nrow(test_data), "\n"))
+# Estimate initial sigma using sigest
+sigma_estimate <- sigest(Species ~ ., data = train_data, frac = 1)
+initial_sigma <- sigma_estimate[1]
+# Define a grid search for sigma values
+sigma_grid <- expand.grid(
+  sigma = c(initial_sigma / 5, initial_sigma / 2, initial_sigma,
+            initial_sigma * 2, initial_sigma * 5,
+            0.01, 0.1, 1, 10, 100)
+)
+sigma_grid <- unique(sigma_grid) %>% arrange(sigma)
+cat("--- RBF Kernel Sigma Search Grid ---\n")
+print(sigma_grid)
+# Configure 10-Fold Cross-Validation
+fitControl <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE,
+  summaryFunction = multiClassSummary
+)
+# Execute Grid Search and Cross-Validation
+set.seed(42)
+gpc_tuned_model <- train(
+  Species ~ .,
+  data = train_data,
+  method = "gaussprRadial",
+  tuneGrid = sigma_grid,
+  trControl = fitControl,
+  metric = "Accuracy"
+)
+cat("--- Cross-Validation Results Summary ---\n")
+print(gpc_tuned_model)
+# Extract best parameter and evaluate on test set
+best_sigma <- gpc_tuned_model$bestTune$sigma
+cat(paste("Optimal Sigma found by Cross-Validation:", round(best_sigma, 4), "\n"))
+best_predictions <- predict(gpc_tuned_model, newdata = test_data)
+final_conf_matrix <- confusionMatrix(best_predictions, test_data$Species)
+cat("\n----------------------------------------\n")
+cat("--- Final Tuned Model Evaluation (Based on Best Sigma) ---\n")
+cat("----------------------------------------\n")
+print(final_conf_matrix)
+cat(paste("Optimal Model Test Accuracy:",
+          round(final_conf_matrix$overall['Accuracy'], 4), "\n"))
+cat("\n--- Generating Decision Boundary Plot ---\n")
+# Use only 2 features for plotting preparation
+iris_2d <- iris[, c("Sepal.Length", "Petal.Length", "Species")]
+train_data_2d <- iris_2d[index, ]
+# Re-train OVA models with the optimal sigma (best_sigma) on 2D features
+rbf_kernel_opt <- rbfdot(sigma = best_sigma)
+classes <- levels(train_data_2d$Species)
+ova_models_2d_plot <- list()
+for (cls in classes) {
+  train_data_2d$Binary_Species <- as.factor(ifelse(train_data_2d$Species == cls, "YES", "NO"))
+  
+  model_name <- paste0("vs_", cls)
+  ova_models_2d_plot[[model_name]] <- gausspr(Binary_Species ~ Sepal.Length + Petal.Length,
+                                              data = train_data_2d,
+                                              type = "classification",
+                                              kernel = rbf_kernel_opt,
+                                              kpar = list(sigma = best_sigma))
+}
+# Define plot grid
+x_range <- seq(min(iris_2d$Sepal.Length) - 0.5, max(iris_2d$Sepal.Length) + 0.5, length.out = 100)
+y_range <- seq(min(iris_2d$Petal.Length) - 0.5, max(iris_2d$Petal.Length) + 0.5, length.out = 100)
+grid_data <- expand.grid(Sepal.Length = x_range, Petal.Length = y_range)
+# OVA probability prediction on the grid
+prob_matrix <- matrix(NA, nrow = nrow(grid_data), ncol = length(classes), dimnames = list(NULL, classes))
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  model_name <- paste0("vs_", cls)
+  probs <- predict(ova_models_2d_plot[[model_name]], grid_data, type = "probabilities")
+  prob_matrix[, i] <- probs[, "YES"]
+}
+# Determine final class (Max Probability Wins)
+max_prob_indices <- apply(prob_matrix, 1, which.max)
+grid_data$Predicted_Species <- factor(classes[max_prob_indices], levels = classes)
+
+p <- ggplot(grid_data, aes(x = Sepal.Length, y = Petal.Length)) +
+  geom_raster(aes(fill = Predicted_Species), alpha = 0.3, interpolate = TRUE) +
+  geom_point(data = train_data_2d, aes(color = Species), size = 3, shape = 19, stroke = 1) +
+  scale_fill_manual(values = c("setosa" = "red", "versicolor" = "green", "virginica" = "blue")) +
+  scale_color_manual(values = c("setosa" = "darkred", "versicolor" = "darkgreen", "virginica" = "darkblue")) +
+  labs(
+    title = "GPC Decision Boundary Projection (RBF Kernel)",
+    x = "Sepal Length",
+    y = "Petal Length",
+    fill = "Predicted Species",
+    color = "True Species"
+  ) +
+  theme_minimal(base_size = 14)
+
+print(p)
+sigma_val <- sigma_estimate[1]
+cat(paste("\nEstimated RBF Kernel Sigma (sigest):", round(sigma_val, 4), "\n"))
+rbf_kernel <- rbfdot(sigma = sigma_val)
+classes <- levels(train_data$Species)
+ova_models <- list()
+for (cls in classes) {
+  train_data$Binary_Species <- as.factor(ifelse(train_data$Species == cls, "YES", "NO"))
+  formula_str <- paste0("Binary_Species ~ Sepal.Length + Sepal.Width + Petal.Length + Petal.Width")
+  model_name <- paste0("vs_", cls)
+  ova_models[[model_name]] <- gausspr(as.formula(formula_str),
+                                      data = train_data,
+                                      type = "classification",
+                                      kernel = rbf_kernel,
+                                      kpar = list(sigma = sigma_val))
+}
+cat("--- OVA Model Training (sigest sigma) Completed ---\n")
+
+test_prob_matrix <- matrix(NA, nrow = nrow(test_data), ncol = length(classes),
+                           dimnames = list(NULL, classes))
+
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  model_name <- paste0("vs_", cls)
+  
+  probs <- predict(ova_models[[model_name]], test_data, type = "probabilities")
+  test_prob_matrix[, i] <- probs[, "YES"]
+}
+max_prob_indices <- apply(test_prob_matrix, 1, which.max)
+test_predictions <- factor(classes[max_prob_indices], levels = classes)
+# Generate confusion matrix and statistics
+conf_matrix <- confusionMatrix(data = test_predictions,
+                               reference = test_data$Species)
+cat("\n----------------------------------------\n")
+cat("--- Final OVA GPC Model Evaluation (Using All Features) ---\n")
+cat("----------------------------------------\n")
+print(conf_matrix)
+
+accuracy <- conf_matrix$overall['Accuracy']
+kappa <- conf_matrix$overall['Kappa']
+cat(paste("Final Test Accuracy (Accuracy):", round(accuracy, 4), "\n"))
+cat(paste("Kappa Statistic:", round(kappa, 4), "\n"))
+library(kernlab)
+library(mlbench)
+library(caret)
+library(dplyr)
+library(MLmetrics)
+library(ggplot2)
+data(BreastCancer)
+bc <- BreastCancer[, -1] # Remove ID column
+# Delete rows with NA
+bc <- na.omit(bc)
+# Convert factor feature columns to numeric
+bc[, 1:9] <- lapply(bc[, 1:9], function(x) as.numeric(as.character(x)))
+# Target column is a factor (ensure class names are standard)
+bc$Class <- as.factor(bc$Class)
+levels(bc$Class) <- c("benign", "malignant") # Easier for evaluation
+# Split into training and testing sets
+set.seed(42)
+train_idx <- createDataPartition(bc$Class, p = 0.7, list = FALSE)
+bc_train <- bc[train_idx, ]
+bc_test  <- bc[-train_idx, ]
+print(paste("Training Set Size:", nrow(bc_train)))
+print(paste("Testing Set Size:", nrow(bc_test)))
+sigma_estimate <- sigest(Class ~ ., data = bc_train, frac = 1)
+initial_sigma <- sigma_estimate[1]
+sigma_grid <- expand.grid(
+  sigma = c(initial_sigma / 5, initial_sigma, initial_sigma * 5, 0.01, 0.1, 1)
+) %>% arrange(sigma)
+print("--- RBF Kernel Sigma Search Grid ---")
+print(sigma_grid)
+fitControl <- trainControl(
+  method = "cv",
+  number = 5, # 5-fold CV
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary, # Two-class evaluation
+  savePredictions = "final"
+)
+set.seed(42)
+gpc_tuned_model <- train(
+  Class ~ .,
+  data = bc_train,
+  method = "gaussprRadial", # RBF kernel
+  tuneGrid = sigma_grid,
+  trControl = fitControl,
+  preProcess = c("center", "scale"), # Standardize features
+  metric = "ROC" # Optimization goal: maximize AUC
+)
+
+print("--- Cross-Validation Results Summary ---")
+print(gpc_tuned_model)
+best_sigma <- gpc_tuned_model$bestTune$sigma
+print(paste("Optimal sigma value found by cross-validation:", round(best_sigma, 4)))
+best_predictions <- predict(gpc_tuned_model, newdata = bc_test)
+final_conf_matrix <- confusionMatrix(best_predictions, bc_test$Class, positive = "malignant")
+print("----------------------------------------")
+print("--- Final Optimized Model Evaluation (Based on Best Sigma) ---")
+print("----------------------------------------")
+print(final_conf_matrix)
+print(paste("Test Set Accuracy:", round(final_conf_matrix$overall['Accuracy'], 4)))
+rbf_kernel_opt <- rbfdot(sigma = best_sigma)
+gpc_2d_plot <- gausspr(Class ~ Cl.thickness + Cell.size,
+                       data = bc_train,
+                       type = "classification",
+                       kernel = rbf_kernel_opt)
+features_2d <- bc_train %>% dplyr::select(Cl.thickness, Cell.size)
+x_range <- seq(min(features_2d$Cl.thickness) - 1, max(features_2d$Cl.thickness) + 1, length.out = 100)
+y_range <- seq(min(features_2d$Cell.size) - 1, max(features_2d$Cell.size) + 1, length.out = 100)
+grid_data <- expand.grid(Cl.thickness = x_range, Cell.size = y_range)
+prob_malignant <- predict(gpc_2d_plot, grid_data, type = "probabilities")[, "malignant"]
+grid_data$Predicted_Class <- factor(ifelse(prob_malignant > 0.5, "malignant", "benign"),
+                                    levels = levels(bc_train$Class))
+grid_data$Uncertainty <- 1 - abs(prob_malignant - 0.5) * 2
+p_uncertainty <- ggplot(grid_data, aes(x = Cl.thickness, y = Cell.size)) +
+  geom_tile(aes(fill = Predicted_Class, alpha = 1 - Uncertainty)) +
+  geom_contour(aes(z = prob_malignant), breaks = c(0.45, 0.5, 0.55),
+               color = "black", linewidth = 0.3, linetype = "dotted") +
+  geom_point(data = bc_train, aes(color = Class), size = 3, shape = 19, stroke = 1) +
+  scale_fill_manual(values = c("benign" = "blue", "malignant" = "red"), name = "Predicted Class") +
+  scale_color_manual(values = c("benign" = "darkblue", "malignant" = "darkred"), name = "True Class") +
+  labs(
+    title = "GPC Predictive Uncertainty Map (RBF Kernel)",
+    x = "Clump Thickness",
+    y = "Uniformity of Cell Size"
+  ) +
+  scale_alpha_continuous(range = c(0.1, 0.9), guide = "none") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+print(p_uncertainty)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
